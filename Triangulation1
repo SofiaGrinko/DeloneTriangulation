@@ -1,0 +1,164 @@
+points = RandomReal[{0, 10}, {100, 2}];
+Graphics[{Point[points]}, ImageSize -> 150, Axes -> True];
+
+sorted = SortBy[points, #[[2]] &];
+{p1, p2} = {sorted[[1 ;; Floor@(Length@points/2)]], 
+   sorted[[Floor@(Length@points/2) + 1 ;;]]};
+Dimensions /@ {p1, p2}
+Graphics[{Red, Point[p1], Blue, Point[p2]}, ImageSize -> 150, 
+ Axes -> True]
+
+sorted = SortBy[points, #[[1]] &];
+{p1, p2} = {sorted[[1 ;; Floor@(Length@points/2)]], 
+   sorted[[Floor@(Length@points/2) + 1 ;;]]};
+Dimensions /@ {p1, p2}
+Graphics[{Red, Point[p1], Blue, Point[p2]}, ImageSize -> 150, 
+ Axes -> True]
+
+
+(*Функция для вычисления ориентации трех точек:p,q,r*)
+ClearAll[Orientation];
+Orientation[p_, q_, r_] := 
+  Sign[Det[{{q[[1]] - p[[1]], q[[2]] - p[[2]]}, {r[[1]] - p[[1]], 
+      r[[2]] - p[[2]]}}]];
+
+
+(*Функция для сортировки точек по углу относительно базовой точки*)
+ClearAll[SortByAngle];
+SortByAngle[points_List, basePoint_] := 
+  SortBy[points, 
+   ArcTan[#[[1]] - basePoint[[1]], #[[2]] - basePoint[[2]]] &];
+
+
+*Основная функция для построения выпуклой оболочки*)
+ClearAll[GrahamScan];
+GrahamScan[points_List] := Module[
+   {n = Length[points], basePoint, sortedPoints, hull, top},
+   
+   (*Выпуклая оболочка невозможна для менее 3 точек*)
+   If[n < 3, Return[points]];
+   
+   (*Находим точку с минимальной координатой y (при равенстве \
+минимальной x)*)basePoint = First@SortBy[points, {#[[2]], #[[1]]} &];
+   
+   (*Сортируем остальные точки по углу относительно базовой точки*)
+   sortedPoints = Rest@SortByAngle[points, basePoint];
+   sortedPoints = Prepend[sortedPoints, basePoint];
+   
+   (*Инициализируем стек оболочки*)
+   hull = Take[sortedPoints, 2];
+   
+   (*Обрабатываем остальные точки*)
+   Do[While[
+     Length[hull] > 1 && 
+      Orientation[hull[[-2]], hull[[-1]], sortedPoints[[i]]] <= 0, 
+     hull = Most[hull]; 
+     
+     (*Убираем точку из оболочки*)];
+    AppendTo[hull, sortedPoints[[i]]], {i, 3, n}];
+   Return[hull];];
+
+
+
+
+
+
+(*Триангуляция 4-ех точек*)
+ClearAll[triangulationOfFourPoints];
+triangulationOfFourPoints[points_List] :=
+ Module[
+  {sortedPoints, diag1, diag2, triangles, basePoint},
+  basePoint = First@SortBy[points, {#[[2]], #[[1]]} &];
+  sortedPoints = SortByAngle[points, basePoint];
+  diag1 = Line[{sortedPoints[[1]], sortedPoints[[3]]}];
+  diag2 = Line[{sortedPoints[[2]], sortedPoints[[4]]}];
+  If[
+   Head@RegionIntersection[diag1, Polygon@sortedPoints] === Line &&
+    Head@RegionIntersection[diag2, Polygon@sortedPoints] === Line,
+   {{sortedPoints[[1]], sortedPoints[[3]], 
+     sortedPoints[[2]]}, {sortedPoints[[1]], sortedPoints[[3]], 
+     sortedPoints[[4]]}},
+   {{sortedPoints[[1]], sortedPoints[[2]], sortedPoints[[3]]},
+    {sortedPoints[[1]], sortedPoints[[4]], sortedPoints[[3]]},
+    {sortedPoints[[2]], sortedPoints[[4]], sortedPoints[[3]]}}
+   ]
+  ]
+
+
+
+
+
+
+(* Разбиение множества точек по заданной оси (координате x или y)*)
+ClearAll[splitPoints];
+splitPoints[points_List, splitAxis_Integer] :=
+ Module[
+  {sortedPoints, n},
+  n = Length@points;
+  sortedPoints = SortBy[points, #[[splitAxis]] &];
+  {sortedPoints[[1 ;; Floor@(n/2)]],
+   sortedPoints[[Floor@(n/2) + 1 ;; n]]}
+  ]
+
+
+
+(*Тестирование работы функции triangulationOfFourPoints*)
+points = RandomReal[{0, 1}, {4, 2}];
+sorted = SortByAngle[points, First@SortBy[points, {#[[2]], #[[1]]} &]];
+testTri = triangulationOfFourPoints[points];
+GraphicsRow[{
+  Graphics[{
+    {RandomColor[], Triangle[#]} & /@ testTri,
+    Green, PointSize@0.03, Point[points]},
+   ImageSize -> 200],
+  Graphics[{
+    {Point[sorted[[#]]], Text[#, sorted[[#]] + 1/10*sorted[[#]]]} & /@
+      Range[1, Length@sorted],
+    Opacity@0.2, Polygon[sorted]
+    }, ImageSize -> 200]
+  }]
+
+
+
+(* Рекурсивный алгоритм триангуляции "Разделяй и властвуй"*)
+ClearAll[recursiveTriangulation];
+recursiveTriangulation[points_List, splitAxis_Integer : 1] :=
+ Module[
+  {lenPoints = Length@points, sorted, split1, split2, nextSplitAxis},
+  
+  {split1, split2} = splitPoints[points, splitAxis];
+  sorted = Join[split1, split2];
+  
+  nextSplitAxis = If[splitAxis == 1, 2, 1];
+  
+  Which[
+   lenPoints == 1, {points},
+   lenPoints == 2, {points},
+   lenPoints == 3, {points},
+   lenPoints == 4, triangulationOfFourPoints[points],
+   lenPoints == 8, 
+   Join[triangulationOfFourPoints[split1], 
+    triangulationOfFourPoints[split2]],
+   lenPoints < 12, 
+   Join[recursiveTriangulation[sorted[[1 ;; 3]], nextSplitAxis], 
+    recursiveTriangulation[sorted[[4 ;;]], nextSplitAxis]],
+   lenPoints >= 12, Join[
+    recursiveTriangulation[split1, nextSplitAxis],
+    recursiveTriangulation[split2, nextSplitAxis]]
+   ](*Which*)
+  ](*Module*)
+
+
+
+
+(*Тестирование работы функции recursiveTriangulation*)
+nPoints = RandomInteger[{1, 100}]
+points = RandomReal[{0, 10}, {nPoints, 2}];
+tempTri = 
+  recursiveTriangulation[
+   points];(*Список полученных треугольников, отрезков, точек*)
+Graphics[{
+  {Opacity@0.7, RandomColor[], Triangle[#]} & /@ tempTri,
+  Green, PointSize@0.02, Point[points]
+  },
+ ImageSize -> 250]
