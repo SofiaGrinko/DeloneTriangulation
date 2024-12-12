@@ -1,0 +1,444 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import math
+
+def orientation(p1, p2, p3):
+    """
+    Определяет ориентацию трех точек.
+    
+    :param p1: Первая точка.
+    :param p2: Вторая точка.
+    :param p3: Третья точка.
+    :return: 0, 1 или -1 в зависимости от ориентации (коллинеарная, по часовой стрелке, против часовой стрелки).
+    """
+    return np.sign(np.cross(np.array(p1) - np.array(p2), np.array(p1) - np.array(p3)))
+
+def get_boundary(points):
+    """
+    Находит граничные точки множества точек (выпуклая оболочка).
+    
+    :param points: Множество точек.
+    :return: Список граничных точек.
+    """
+    if len(points) < 3:
+        return points
+    start = min(points, key=lambda a: (a[1], a[0]))
+    sorted_points = sorted(points, key=lambda a: (np.arctan2(a[1] - start[1], a[0] - start[0]), (a[0], a[1])))
+    boundary = [start, sorted_points[1]]
+    for p in sorted_points[2:]:
+        while len(boundary) > 1 and orientation(boundary[-2], p, boundary[-1]) != -1:
+            boundary.pop()
+        boundary.append(p)
+    return boundary
+def find_circle_center_and_radius(p1, p2, p3):
+    x1, y1 = p1
+    x2, y2 = p2
+    x3, y3 = p3
+
+    A = np.array([[*p1, 1],[*p2, 1],[*p3, 1]])
+
+    B = np.array([np.array(p1) @ np.array(p1),np.array(p2) @ np.array(p2),np.array(p3) @ np.array(p3)]).reshape(-1, 1)
+    C = np.linalg.inv(A) @ B
+
+    a = 0.5 * C[0]
+    b = 0.5 * C[1]
+
+    radius = np.sqrt((x1 - a)**2 + (y1 - b)**2)
+
+
+    return (a, b), radius
+
+def in_circle(center, radius, p):
+    """
+    Проверяет, лежит ли точка внутри окружности, описанной вокруг треугольника.
+    
+    :param center: Центр окружности.
+    :param radius: Радиус окружности.
+    :param p: Точка для проверки.
+    :return: True, если точка внутри окружности, иначе False.
+    """
+    px, py = p
+    cx, cy = center
+    distance = np.sqrt((px - cx)**2 + (py - cy)**2)
+    return distance < radius
+
+class TriangulationGraph:
+    def __init__(self, points):
+        self.points = {i: point for i, point in enumerate(points)}
+        self.edges = {}
+        self.triangles = set()
+
+    def add_triangle(self, a, b, c):
+        """
+        Добавляет треугольник в граф, создавая ребра между его вершинами.
+        
+        :param a: Индекс первой вершины треугольника.
+        :param b: Индекс второй вершины треугольника.
+        :param c: Индекс третьей вершины треугольника.
+        """
+        self.triangles.add((a, b, c))
+        self.add_edge(a, b)
+        self.add_edge(b, c)
+        self.add_edge(c, a)
+
+    def add_edge(self, u, v):
+        """
+        Добавляет ребро в граф.
+        
+        :param u: Индекс первой вершины ребра.
+        :param v: Индекс второй вершины ребра.
+        """
+        if u > v:
+            u, v = v, u
+        if (u, v) in self.edges:
+            self.edges[(u, v)].add((u, v))
+        else:
+            self.edges[(u, v)] = {(u, v)}
+
+    def remove_triangle(self, a, b, c):
+        """
+        Удаляет треугольник из графа.
+        
+        :param a: Индекс первой вершины треугольника.
+        :param b: Индекс второй вершины треугольника.
+        :param c: Индекс третьей вершины треугольника.
+        """
+        self.triangles.discard((a, b, c))
+        self.remove_edge(a, b)
+        self.remove_edge(b, c)
+        self.remove_edge(c, a)
+
+    def remove_edge(self, u, v):
+        """
+        Удаляет ребро из графа.
+        
+        :param u: Индекс первой вершины ребра.
+        :param v: Индекс второй вершины ребра.
+        """
+        if u > v:
+            u, v = v, u
+        if (u, v) in self.edges:
+            self.edges.pop((u, v))
+
+    def get_convex_hull(self):
+        """
+        Возвращает выпуклую оболочку множества точек.
+        
+        :return: Список граничных точек (выпуклая оболочка).
+        """
+        return get_boundary(list(self.points.values()))
+
+    def check_delaunay_edge(self, u, v):
+        """
+        Проверяет, является ли заданное ребро Делоне.
+        
+        :param u: Индекс первой вершины ребра.
+        :param v: Индекс второй вершины ребра.
+        :return: True, если ребро соответствует условию Делоне, иначе False.
+        """
+        adjacent_triangles = [tri for tri in self.triangles if u in tri and v in tri]
+        if len(adjacent_triangles) == 2:
+            tri1, tri2 = adjacent_triangles
+            w = list(set(tri1) - {u, v})[0]
+            z = list(set(tri2) - {u, v})[0]
+            center, radius = find_circle_center_and_radius(self.points[u], self.points[v], self.points[w])
+            return not in_circle(center, radius, self.points[z])
+        return True
+
+    def check_all_delaunay_edges(self):
+        """
+        Проверяет все ребра в графе на соответствие условию Делоне.
+        
+        :return: Словарь с результатами проверки ребер.
+        """
+        print(self.points)
+        results = {}
+        for edge in self.edges:
+            results[edge] = self.check_delaunay_edge(*edge)
+        return results
+
+    def fix_bad_edge(self, u, v):
+        """
+        Исправляет заданное ребро, если оно не соответствует условию Делоне.
+        
+        :param u: Индекс первой вершины ребра.
+        :param v: Индекс второй вершины ребра.
+        """
+        adjacent_triangles = [tri for tri in self.triangles if u in tri and v in tri]
+        if len(adjacent_triangles) == 2:
+            tri1, tri2 = adjacent_triangles
+            w = list(set(tri1) - {u, v})[0]
+            z = list(set(tri2) - {u, v})[0]
+            center, radius = find_circle_center_and_radius(self.points[u], self.points[v], self.points[w])
+            if in_circle(center, radius, self.points[z]):
+                self.remove_edge(u, v)
+                self.add_edge(w, z)
+                self.triangles.discard(tri1)
+                self.triangles.discard(tri2)
+                self.add_triangle(u, w, z)
+                self.add_triangle(v, w, z)
+
+    def fix_all_edges(self):
+        """
+        Исправляет все ребра в триангуляции, чтобы они соответствовали условию Делоне.
+        """
+        while True:
+            flipped = False
+            for edge in list(self.edges):
+                u, v = edge
+                if not self.check_delaunay_edge(u, v):
+                    self.fix_bad_edge(u, v)
+                    flipped = True
+            if not flipped:
+                break
+
+    def find_quad_by_diagonal(self, u, v):
+        """
+        Находит четырехугольник по заданной диагонали (ребру графа).
+        
+        :param u: Индекс первой вершины ребра.
+        :param v: Индекс второй вершины ребра.
+        :return: Список из четырех вершин четырехугольника или None, если четырехугольник не найден.
+        """
+        adjacent_triangles = [tri for tri in self.triangles if u in tri and v in tri]
+        
+        if len(adjacent_triangles) == 2:
+            tri1, tri2 = adjacent_triangles
+            w = list(set(tri1) - {u, v})[0]
+            z = list(set(tri2) - {u, v})[0]
+            return [u, v, w, z]
+        return None
+
+    def find_circumcircle(self, a, b, c):
+        """
+        Находит центр и радиус описанной окружности около треугольника по индексам его вершин.
+        
+        :param a: Индекс первой вершины треугольника.
+        :param b: Индекс второй вершины треугольника.
+        :param c: Индекс третьей вершины треугольника.
+        :return: Центр окружности и радиус.
+        """
+        p1, p2, p3 = self.points[a], self.points[b], self.points[c]
+        return find_circle_center_and_radius(p1, p2, p3)
+
+    def visualize(self):
+        """
+        Визуализирует граф триангуляции.
+        """
+        for edge in self.edges:
+            u, v = edge
+            pts = [self.points[u], self.points[v]]
+            plt.plot([pts[0][0], pts[1][0]], [pts[0][1], pts[1][1]], 'r-')
+
+        points = list(self.points.values())
+        plt.scatter([p[0] for p in points], [p[1] for p in points], c='b')
+        plt.xlabel('X')
+        plt.ylabel('Y')
+        plt.title('Triangulation')
+        plt.show()
+import numpy as np
+import matplotlib.pyplot as plt
+
+def triangulate_quad(points):
+    """
+    Выполняет триангуляцию выпуклого четырехугольника.
+
+    :param points: Множество точек.
+    :return: Список треугольников, образованных точками.
+    """
+    graph = TriangulationGraph(points)
+    bound = graph.get_convex_hull()
+    bound_indices = [list(graph.points.values()).index(p) for p in bound]
+    
+    if len(bound_indices) == 3:
+        for i, p in enumerate(points):
+            if i not in bound_indices:
+                idx = i
+                return [[bound_indices[0], bound_indices[1], idx], 
+                        [bound_indices[0], bound_indices[2], idx], 
+                        [bound_indices[1], bound_indices[2], idx]]
+    else:
+        points = bound
+        if len(points) != 4:
+            raise ValueError("Количество точек должно быть равно 4")
+
+        p1, p2, p3, p4 = bound_indices
+        center, radius = find_circle_center_and_radius(graph.points[p1], graph.points[p2], graph.points[p3])
+        if in_circle(center, radius, graph.points[p4]):
+            return [[p1, p2, p4], [p2, p3, p4]]
+        else:
+            return [[p1, p2, p3], [p1, p3, p4]]
+
+def triangulate(points, ax=0):
+    points = [list(p) for p in sorted(points, key=lambda x: x[ax % 2])]
+    N = len(points)
+    
+    if N == 3:
+        sub_graph = TriangulationGraph(points)
+        sub_graph.add_triangle(*range(3))
+        return sub_graph
+    
+    elif N == 4:
+        tris = triangulate_quad(points)
+        sub_graph = TriangulationGraph(points)
+        for tri in tris:
+            sub_graph.add_triangle(*[list(sub_graph.points.values()).index(points[i]) for i in tri])
+        return sub_graph
+    
+    elif N == 8:
+        mid = N // 2
+        left = points[:mid]
+        right = points[mid:]
+        return merge_triangulations(triangulate(left, ax + 1), triangulate(right, ax + 1))
+    
+    elif N < 12:
+        left = points[:3]
+        right = points[3:]
+        return merge_triangulations(triangulate(left, ax + 1), triangulate(right, ax + 1))
+    
+    else:
+        mid = math.floor(N / 2)
+        left = points[:mid]
+        right = points[mid:]
+        return merge_triangulations(triangulate(left, ax + 1), triangulate(right, ax + 1))
+def show_triangle(ax, points):
+    ax.plot(*zip(*(points + [points[0]])), 'r-')
+
+def show_triangulate(ax, triangulations):
+    for triangle in triangulations.triangles:
+        points = [triangulations.points[i] for i in triangle]
+        show_triangle(ax, points)
+def distance_point_to_line(point, line_point1, line_point2):
+    """
+    Вычисляет расстояние от точки до прямой, заданной двумя точками.
+    
+    :param point: Точка, от которой вычисляется расстояние.
+    :param line_point1: Первая точка на прямой.
+    :param line_point2: Вторая точка на прямой.
+    :return: Расстояние от точки до прямой.
+    """
+    x0, y0 = point
+    x1, y1 = line_point1
+    x2, y2 = line_point2
+    
+    numerator = abs((y2 - y1) * x0 - (x2 - x1) * y0 + x2 * y1 - y2 * x1)
+    denominator = np.sqrt((y2 - y1) ** 2 + (x2 - x1) ** 2)
+    
+    return numerator / denominator
+
+def distance_between_points(point1, point2):
+    """
+    Вычисляет расстояние между двумя точками.
+    
+    :param point1: Первая точка.
+    :param point2: Вторая точка.
+    :return: Расстояние между точками.
+    """
+    distance = np.sqrt((point2[0] - point1[0])**2 + (point2[1] - point1[1])**2)
+    return distance
+
+def distance_point_to_segment_center(point, seg_point1, seg_point2):
+    """
+    Вычисляет расстояние от точки до центра отрезка, заданного двумя точками.
+    
+    :param point: Точка, от которой вычисляется расстояние.
+    :param seg_point1: Первая точка отрезка.
+    :param seg_point2: Вторая точка отрезка.
+    :return: Расстояние от точки до центра отрезка.
+    """
+    # Вычисляем центр отрезка
+    center = ((seg_point1[0] + seg_point2[0]) / 2, (seg_point1[1] + seg_point2[1]) / 2)
+    
+    # Вычисляем расстояние от точки до центра отрезка
+    distance = np.sqrt((center[0] - point[0])**2 + (center[1] - point[1])**2)
+    
+    return distance
+
+def merge_triangulations(graph1, graph2):
+    """
+    Соединяет две триангуляции по "шву", достраивая недостающие ребра до полной выпуклой оболочки и
+    заполняя внутреннюю область треугольниками.
+
+    :param graph1: Первый граф триангуляции (экземпляр класса TriangulationGraph).
+    :param graph2: Второй граф триангуляции (экземпляр класса TriangulationGraph).
+    :return: Новый объединенный граф триангуляции (экземпляр класса TriangulationGraph).
+    """
+    # Находим выпуклые оболочки до слияния
+    hull1 = graph1.get_convex_hull()
+    hull2 = graph2.get_convex_hull()
+
+    # Объединяем точки двух графов и сохраняем новые индексы
+    combined_points = list(graph1.points.values()) + list(graph2.points.values())
+    combined_graph = TriangulationGraph(combined_points)
+    # Создаем отображение старых индексов в новые
+    index_map1 = {old_idx: new_idx for old_idx, new_idx in enumerate(range(len(graph1.points)))}
+    index_map2 = {old_idx: new_idx for old_idx, new_idx in enumerate(range(len(graph1.points), len(graph1.points) + len(graph2.points)))}
+    
+    # Объединяем треугольники двух графов с учетом новых индексов
+    for tri in graph1.triangles:
+        new_tri = tuple(index_map1[idx] for idx in tri)
+        combined_graph.add_triangle(*new_tri)
+    
+    for tri in graph2.triangles:
+        new_tri = tuple(index_map2[idx] for idx in tri)
+        combined_graph.add_triangle(*new_tri)
+    
+    combined_graph.visualize()
+    
+    # Находим выпуклую оболочку объединенного множества точек
+    combined_hull = combined_graph.get_convex_hull()
+    
+    # Получаем индексы точек выпуклой оболочки
+    hull_indices = [list(combined_graph.points.values()).index(p) for p in combined_hull]
+    
+    # Определяем внутренние точки, которые раньше были в выпуклых оболочках, но теперь вне них
+    hull1_indices = [list(combined_graph.points.values()).index(p) for p in hull1]
+    hull2_indices = [list(combined_graph.points.values()).index(p) for p in hull2]
+    inner_points1 = [idx for idx in hull1_indices if idx not in hull_indices]
+    inner_points2 = [idx for idx in hull2_indices if idx not in hull_indices]
+    inner_points_combined = list(set(inner_points1 + inner_points2))
+    
+    # Добавляем недостающие ребра для получения полной выпуклой оболочки
+    for i in range(len(hull_indices)):
+        if hull_indices[i] in hull1_indices and hull_indices[(i + 1) % len(hull_indices)] in hull2_indices:
+            u = hull_indices[i]
+            v = hull_indices[(i + 1) % len(hull_indices)]
+            main = [u, v]
+            combined_graph.add_edge(u, v)
+        elif hull_indices[i] in hull2_indices and hull_indices[(i + 1) % len(hull_indices)] in hull1_indices:
+            u = hull_indices[i]
+            v = hull_indices[(i + 1) % len(hull_indices)]
+            inner_points_combined.append(u)
+            inner_points_combined.append(v)
+            combined_graph.add_edge(u, v)
+    
+    combined_graph.visualize()
+    # Заполняем внутреннюю область треугольниками
+    while inner_points_combined:
+        dist = np.inf
+        target = None
+        for idx in inner_points_combined:
+            p = combined_graph.points[idx]
+            d = distance_point_to_segment_center(p, combined_graph.points[main[0]], combined_graph.points[main[1]])
+            if d < dist:
+                dist = d
+                target = idx
+        
+        combined_graph.add_triangle(target, *main)
+        main = [main[0], target] if (main[0] in hull1_indices and target in hull2_indices) or (main[0] in hull2_indices and target in hull1_indices) else [main[1], target]
+        inner_points_combined.remove(target)
+        combined_graph.visualize()
+    
+    combined_graph.fix_all_edges()
+    combined_graph.visualize()
+    return combined_graph
+# Пример использования
+points = [tuple(p) for p in np.random.uniform(low=[0,0], high=[5,5], size=[20,2])]
+points = [(0, 0), (1, 0), (0.8, 0.9), (0, 1), (0.4, 0.3), (2, 2), (2, 0.5)]
+fig, ax = plt.subplots()
+ax.scatter(*zip(*points), c='b')
+
+graphs = triangulate(points)
+
+show_triangulate(ax, graphs)
+plt.show()
